@@ -6,8 +6,9 @@
  * found in the LICENSE file at https://angular.io/license
  */
 import * as CopyWebpackPlugin from 'copy-webpack-plugin';
+import * as glob from 'glob';
 import * as path from 'path';
-import { HashedModuleIdsPlugin, debug } from 'webpack';
+import { HashedModuleIdsPlugin, Rule, debug } from 'webpack';
 import { AssetPatternObject } from '../../../browser/schema';
 import { BundleBudgetPlugin } from '../../plugins/bundle-budget';
 import { CleanCssWebpackPlugin } from '../../plugins/cleancss-webpack-plugin';
@@ -32,7 +33,7 @@ export const buildOptimizerLoader: string = g['_DevKitIsLocal']
 
 // tslint:disable-next-line:no-big-function
 export function getCommonConfig(wco: WebpackConfigOptions) {
-  const { root, projectRoot, buildOptions } = wco;
+  const { root, projectRoot, buildOptions, sourceRoot: include } = wco;
 
   const nodeModules = findUp('node_modules', projectRoot);
   if (!nodeModules) {
@@ -233,6 +234,35 @@ export function getCommonConfig(wco: WebpackConfigOptions) {
     ...(buildOptions.platform == 'server' ? { mangle: false } : {}),
   };
 
+  const extraRules: Rule[] = [];
+
+  // if (buildOptions.codeCoverage && CliConfig.fromProject()) {
+  if (buildOptions.codeCoverage) {
+    const codeCoverageExclude = buildOptions.codeCoverageExclude;
+    const exclude: (string | RegExp)[] = [
+      /\.(e2e|spec)\.ts$/,
+      /node_modules/,
+    ];
+
+    if (codeCoverageExclude) {
+      codeCoverageExclude.forEach((excludeGlob: string) => {
+        const excludeFiles = glob
+          .sync(path.join(root, excludeGlob), { nodir: true })
+          .map(file => path.normalize(file));
+        exclude.push(...excludeFiles);
+      });
+    }
+
+    extraRules.push({
+      test: /\.(js|ts)$/,
+      loader: 'istanbul-instrumenter-loader',
+      options: { esModules: true },
+      enforce: 'post',
+      exclude,
+      include,
+    });
+  }
+
   return {
     mode: buildOptions.optimization ? 'production' : 'development',
     devtool: false,
@@ -264,6 +294,7 @@ export function getCommonConfig(wco: WebpackConfigOptions) {
     },
     module: {
       rules: [
+        ...extraRules,
         { test: /\.html$/, loader: 'raw-loader' },
         {
           test: /\.(eot|svg|cur|jpg|png|webp|gif|otf|ttf|woff|woff2|ani)$/,
